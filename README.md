@@ -80,6 +80,7 @@ git clone https://github.com/ST10465769/CybersecurityAwarenessChatbotPart2.git
 - Press **F5** to run
 - The GUI will launch, play the voice greeting, and prompt you for your name
 
+✅ CI build passes successfully on every push to main
 ---
 
 ## 💬 How to Use the Chatbot
