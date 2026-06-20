@@ -31,6 +31,7 @@ namespace CybersecurityChatbot
         /// Tests whether the database connection works. Returns true/false
         /// so the app never crashes if MySQL isn't running.
         /// </summary>
+        // Fixed CS0051: DatabaseHelper must be public, so ActivityLogger and TaskAssistant can reference it
         public bool TestConnection()
         {
             try
