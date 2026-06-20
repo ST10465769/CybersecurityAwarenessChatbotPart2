@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace CybersecurityChatbot
 {
+    // Routes user input to TaskAssistant, QuizGame, or ActivityLogger before falling back to keyword/sentiment logic
     /// <summary>
     /// Core chatbot logic class. MainWindow.xaml.cs only calls ProcessInput() and GetGreeting().
     /// Routes input through keyword recognition, sentiment detection, memory, conversation flow,
