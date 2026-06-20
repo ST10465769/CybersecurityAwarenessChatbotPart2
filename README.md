@@ -121,3 +121,10 @@ The project includes a GitHub Actions workflow that automatically builds the pro
 **Simamkele Kinola Kaulela**
 Student Number: ST10465769
 The Independent Institute of Education — 2026
+
+## Part 3 (POE) Additions
+   - MySQL database integration (`CybersecurityChatbotDB`) for persistent storage
+   - Task Assistant with NLP-style pattern matching for adding, viewing, completing, and deleting cybersecurity tasks with reminders
+   - Quiz Game module to test cybersecurity awareness
+   - Activity Logger that records and displays recent chatbot actions
+   - All database logic isolated in `DatabaseHelper.cs` for code optimisation
