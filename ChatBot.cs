@@ -5,25 +5,28 @@ namespace CybersecurityChatbot
 {
     /// <summary>
     /// Core chatbot logic class. MainWindow.xaml.cs only calls ProcessInput() and GetGreeting().
-    /// All routing through keyword recognition, sentiment detection, memory, and conversation
-    /// flow happens here — keeping MainWindow thin and code well-structured.
+    /// Routes input through keyword recognition, sentiment detection, memory, conversation flow,
+    /// task assistant, quiz game, and activity log — all kept in separate classes (no God class).
     /// </summary>
     public class ChatBot
     {
         private readonly KeywordResponder _keywords;
         private readonly SentimentDetector _sentiment;
         private readonly MemoryStore _memory;
+        private readonly DatabaseHelper _db;
+        private readonly TaskAssistant _taskAssistant;
+        private readonly QuizGame _quiz;
+        private readonly ActivityLogger _logger;
 
-        private bool _awaitingName = true;       // True until user provides their name
-        private string? _lastTopic = null;        // Tracks current topic for "tell me more"
+        private bool _awaitingName = true;
+        private string? _lastTopic = null;
 
-        // Fallback responses when nothing else matches
         private readonly List<string> _fallbackResponses = new List<string>
         {
-            "I'm not sure I understood that. Try asking about passwords, phishing, privacy, scams, or malware.",
-            "Hmm, I didn't quite catch that. Type 'help' to see what topics I can help you with!",
+            "I'm not sure I understood that. Try asking about passwords, phishing, privacy, scams, or malware. You can also say 'add a task', 'start quiz', or 'show activity log'.",
+            "Hmm, I didn't quite catch that. Type 'help' to see what I can do!",
             "I couldn't find a match for that. Could you try rephrasing, or type 'help' for a list of topics?",
-            "That's outside my knowledge for now. I can help with cybersecurity topics — type 'help' to see them!"
+            "That's outside my knowledge for now. Type 'help' to see everything I can assist with."
         };
 
         private readonly Random _random = new Random();
@@ -33,20 +36,17 @@ namespace CybersecurityChatbot
             _keywords = new KeywordResponder();
             _sentiment = new SentimentDetector();
             _memory = new MemoryStore();
+            _db = new DatabaseHelper();
+            _logger = new ActivityLogger(_db);
+            _taskAssistant = new TaskAssistant(_db, _logger);
+            _quiz = new QuizGame();
         }
 
-        /// <summary>
-        /// Returns the bot's opening message asking for the user's name.
-        /// </summary>
         public string GetGreeting()
         {
             return "👋 Welcome to the Cybersecurity Awareness Bot!\n\nI'm here to help you stay safe online. Before we start — what's your name?";
         }
 
-        /// <summary>
-        /// Main routing method. Called by MainWindow for every user message.
-        /// Returns the bot's complete response string.
-        /// </summary>
         public string ProcessInput(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
@@ -59,12 +59,62 @@ namespace CybersecurityChatbot
             {
                 _memory.UserName = trimmed;
                 _awaitingName = false;
-                return $"Nice to meet you, {_memory.UserName}! 🛡️\n\nI'm your Cybersecurity Awareness Assistant. You can ask me about:\npasswords, phishing, privacy, scams, malware, safe browsing, two-factor authentication, or social engineering.\n\nType 'help' anytime to see all topics, or just start chatting!";
+                return $"Nice to meet you, {_memory.UserName}! 🛡️\n\nI can help with cybersecurity tips, manage tasks, run a quiz, and keep an activity log. Type 'help' anytime to see everything I can do!";
             }
 
             string lowerInput = trimmed.ToLower();
 
-            // Step 2: Handle follow-up phrases — continue on the last topic
+            // Step 2: Quiz is active — route all input to the quiz first
+            if (_quiz.IsActive)
+            {
+                string quizResponse = _quiz.SubmitAnswer(trimmed);
+                if (!_quiz.IsActive)
+                    _logger.Log("Quiz completed");
+                return quizResponse;
+            }
+
+            // Step 3: Awaiting a reminder confirmation from Task Assistant
+            if (_taskAssistant.IsAwaitingReminderResponse)
+            {
+                return _taskAssistant.HandleReminderResponse(trimmed);
+            }
+
+            // Step 4: Start quiz command
+            if (lowerInput.Contains("start quiz") || lowerInput.Contains("play quiz") || lowerInput.Contains("take quiz") || lowerInput == "quiz")
+            {
+                _logger.Log("Quiz started");
+                return _quiz.StartQuiz();
+            }
+
+            // Step 5: Activity log commands
+            if (lowerInput.Contains("show activity log") || lowerInput.Contains("activity log") || lowerInput.Contains("what have you done"))
+            {
+                return _logger.GetFormattedLog();
+            }
+            if (lowerInput == "show more")
+            {
+                return _logger.GetFullFormattedLog();
+            }
+
+            // Step 6: Task Assistant commands (NLP-style keyword detection)
+            if (_taskAssistant.IsViewTasksCommand(lowerInput))
+            {
+                return _taskAssistant.HandleViewTasks();
+            }
+            if (_taskAssistant.IsCompleteTaskCommand(lowerInput))
+            {
+                return _taskAssistant.HandleCompleteTask(trimmed);
+            }
+            if (_taskAssistant.IsDeleteTaskCommand(lowerInput))
+            {
+                return _taskAssistant.HandleDeleteTask(trimmed);
+            }
+            if (_taskAssistant.IsAddTaskCommand(lowerInput))
+            {
+                return _taskAssistant.HandleAddTask(trimmed);
+            }
+
+            // Step 7: Follow-up phrases — continue on the last topic
             string[] followUps = { "tell me more", "explain more", "give me another tip", "more info", "go on", "continue", "another tip", "more please" };
             foreach (string phrase in followUps)
             {
@@ -83,7 +133,7 @@ namespace CybersecurityChatbot
                 }
             }
 
-            // Step 3: Check for interest declarations and store as favourite topic
+            // Step 8: Interest declarations -> favourite topic
             bool savedTopic = _memory.TryDetectAndStoreFavouriteTopic(lowerInput);
             if (savedTopic)
             {
@@ -92,35 +142,35 @@ namespace CybersecurityChatbot
                 return topicTip != null ? topicConfirm + $"💡 {topicTip}" : topicConfirm + "Keep exploring and asking questions!";
             }
 
-            // Step 4: Special command — "help" or "what can you do"
+            // Step 9: Help / what can you do
             if (lowerInput == "help" || lowerInput.Contains("what can you do") || lowerInput.Contains("what can i ask"))
             {
                 var allKeywords = _keywords.GetAllKeywords();
                 string keywordList = string.Join(", ", allKeywords);
-                return $"🛡️ Here are the cybersecurity topics I can help you with:\n\n📋 {keywordList}\n\nJust mention any of these in your message and I'll give you a helpful tip! You can also say 'tell me more' after any response.";
+                return $"🛡️ Here's everything I can help with:\n\n📋 Cybersecurity topics: {keywordList}\n\n✅ Task Assistant: \"add a task to enable 2FA\", \"show my tasks\", \"complete task 1\", \"delete task 2\"\n\n🎮 Quiz: \"start quiz\"\n\n📜 Activity Log: \"show activity log\"\n\nYou can also say 'tell me more' after any tip!";
             }
 
-            // Step 5: "How are you" / purpose / about queries
+            // Step 10: How are you / purpose / about
             if (lowerInput.Contains("how are you") || lowerInput.Contains("how r u"))
-                return $"I'm a bot so I don't have feelings, but I'm running perfectly and ready to help you, {_memory.UserName}! 😊 What cybersecurity topic would you like to explore?";
+                return $"I'm a bot so I don't have feelings, but I'm running perfectly and ready to help you, {_memory.UserName}! 😊";
 
             if (lowerInput.Contains("purpose") || lowerInput.Contains("what are you"))
-                return "My purpose is to educate South African citizens about cybersecurity threats and best practices — helping you stay safe from scams, phishing, malware, and more. 🛡️";
+                return "My purpose is to educate South African citizens about cybersecurity threats and help you stay organised with cybersecurity tasks. 🛡️";
 
             if (lowerInput.Contains("your name") || lowerInput.Contains("who are you"))
-                return "I'm the Cybersecurity Awareness Bot! I was created to help people like you stay protected online. What would you like to learn about?";
+                return "I'm the Cybersecurity Awareness Bot! I help you learn, stay organised, and test your knowledge.";
 
-            // Step 6: Run sentiment detection
+            // Step 11: Sentiment detection
             Sentiment detectedSentiment = _sentiment.Detect(lowerInput);
             string sentimentOpener = _sentiment.GetSentimentResponse(detectedSentiment);
 
-            // Step 7: Run keyword recognition
+            // Step 12: Keyword recognition
             string? matchedKeyword = _keywords.GetMatchedKeyword(lowerInput);
             string? keywordResponse = _keywords.GetResponse(lowerInput);
 
             if (keywordResponse != null)
             {
-                _lastTopic = matchedKeyword; // Remember for follow-ups
+                _lastTopic = matchedKeyword;
 
                 string personalisedOpener = _memory.HasFavouriteTopic && _lastTopic == _memory.FavouriteTopic
                     ? _memory.GetPersonalisedOpener()
@@ -131,20 +181,17 @@ namespace CybersecurityChatbot
                 return fullResponse;
             }
 
-            // Step 8: Sentiment detected but no keyword — still respond empathetically
+            // Step 13: Sentiment detected but no keyword
             if (detectedSentiment != Sentiment.Neutral && !string.IsNullOrEmpty(sentimentOpener))
             {
                 return $"{sentimentOpener}I can help you with topics like passwords, phishing, privacy, scams, and malware. Which would you like to know more about?";
             }
 
-            // Step 9: Fallback — unrecognised input
+            // Step 14: Fallback
             string fallback = _fallbackResponses[_random.Next(_fallbackResponses.Count)];
             return $"⚠️ {fallback}";
         }
 
-        /// <summary>
-        /// Returns the current user's name (used to personalise the GUI header).
-        /// </summary>
         public string UserName => _memory.UserName;
     }
 }
